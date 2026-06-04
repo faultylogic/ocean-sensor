@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ocean-sensor
+  labels:
+    app: ocean-sensor
+spec:
+  rules:
+  # Primary: Pi-hole DNS name — resolves on all network devices automatically
+  - host: ocean-sensor.kind.local
+    http:
+      paths:
+      - pathType: Prefix
+        path: /ocean-overview
+        backend:
+          service:
+            name: ocean-sensor
+            port:
+              number: 80
+  # Fallback: catches direct IP access (host header = IP, no DNS needed)
+  - http:
+      paths:
+      - pathType: Prefix
+        path: /ocean-overview
+        backend:
+          service:
+            name: ocean-sensor
+            port:
+              number: 80

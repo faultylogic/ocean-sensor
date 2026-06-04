@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ocean Sensor Network</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .75rem 1.25rem;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      flex-shrink: 0;
+      z-index: 1000;
+    }
+
+    header h1 { font-size: 1rem; font-weight: 600; letter-spacing: .05em; color: #e6edf3; }
+
+    .header-right { display: flex; align-items: center; gap: 1.25rem; }
+
+    #buoy-count { font-size: .8rem; color: #8b949e; }
+    #buoy-count span { color: #e6edf3; font-weight: 600; }
+
+    #status-badge { display: flex; align-items: center; gap: .4rem; font-size: .78rem; color: #8b949e; }
+
+    #status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #3d444d; transition: background .3s;
+    }
+    #status-dot.connected  { background: #3fb950; box-shadow: 0 0 6px #3fb95066; }
+    #status-dot.connecting { background: #d29922; animation: pulse 1s infinite; }
+    #status-dot.error      { background: #f85149; }
+
+    nav { display: flex; gap: .5rem; }
+    nav a {
+      font-size: .78rem;
+      color: #8b949e;
+      text-decoration: none;
+      padding: .25rem .6rem;
+      border-radius: 5px;
+      border: 1px solid transparent;
+    }
+    nav a:hover { color: #e6edf3; border-color: #30363d; }
+    nav a.active { color: #388bfd; border-color: #388bfd44; background: #388bfd11; }
+
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+
+    #map { flex: 1; }
+
+    /* ── Leaflet popup dark theme ──────────────────────────────────────────── */
+    .leaflet-popup-content-wrapper {
+      background: #161b22;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px #00000066;
+    }
+    .leaflet-popup-tip { background: #161b22; }
+    .leaflet-popup-content {
+      margin: .75rem 1rem;
+      font-size: .82rem;
+      line-height: 1.6;
+      max-height: 65vh;
+      overflow-y: auto;
+    }
+
+    .popup-id { font-size: .95rem; font-weight: 700; color: #e6edf3; margin-bottom: .15rem; }
+    .popup-name { font-size: .75rem; color: #58a6ff; margin-bottom: .35rem; }
+
+    .popup-row { display: flex; justify-content: space-between; gap: 1.5rem; margin-bottom: .1rem; }
+    .popup-label { color: #484f58; font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; }
+    .popup-val { color: #adbac7; font-variant-numeric: tabular-nums; }
+
+    .status-pill {
+      display: inline-block;
+      font-size: .65rem;
+      font-weight: 600;
+      padding: .15em .5em;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: .5rem;
+    }
+    .status-OPERATIONAL  { background: #1f4a2e; color: #3fb950; }
+    .status-DEGRADED     { background: #2d2a1e; color: #d29922; }
+    .status-OFFLINE      { background: #3a1c1c; color: #f85149; }
+    .status-MAINTENANCE  { background: #1c2a3a; color: #58a6ff; }
+
+    .section-hdr {
+      font-size: .65rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #484f58;
+      margin: .6rem 0 .25rem;
+      border-top: 1px solid #21262d;
+      padding-top: .45rem;
+    }
+
+    .data-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .15rem 1.25rem;
+    }
+
+    .data-cell .popup-label { margin-bottom: .05rem; }
+
+    /* ── Fleet Control panel ──────────────────────────────────────────────── */
+    #fleet-control {
+      position: fixed;
+      top: 62px;
+      right: 1rem;
+      z-index: 1100;
+      width: 240px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px #00000077;
+      padding: .85rem 1rem 1rem;
+      font-size: .82rem;
+      color: #c9d1d9;
+    }
+
+    #fleet-control h2 {
+      font-size: .82rem;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      color: #8b949e;
+      margin-bottom: .75rem;
+    }
+
+    .fc-row { margin-bottom: .65rem; }
+
+    .fc-label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: .3rem;
+      color: #adbac7;
+      font-size: .78rem;
+    }
+
+    .fc-label span {
+      font-variant-numeric: tabular-nums;
+      color: #e6edf3;
+      font-weight: 600;
+    }
+
+    .fc-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: #30363d;
+      outline: none;
+      cursor: pointer;
+    }
+    .fc-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #388bfd;
+      cursor: pointer;
+      border: 2px solid #0d1117;
+      transition: background .15s;
+    }
+    .fc-slider::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #388bfd;
+      cursor: pointer;
+      border: 2px solid #0d1117;
+    }
+    .fc-slider:hover::-webkit-slider-thumb { background: #58a6ff; }
+    .fc-slider:hover::-moz-range-thumb     { background: #58a6ff; }
+
+    .fc-total {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: .4rem .55rem;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      margin-bottom: .75rem;
+      font-size: .78rem;
+      color: #8b949e;
+    }
+    .fc-total strong {
+      color: #e6edf3;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #fc-apply {
+      width: 100%;
+      padding: .4rem;
+      background: #238636;
+      color: #e6edf3;
+      border: 1px solid #2ea043;
+      border-radius: 6px;
+      font-size: .8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+    #fc-apply:hover  { background: #2ea043; border-color: #3fb950; }
+    #fc-apply:active { background: #196c2e; }
+    #fc-apply:disabled { opacity: .55; cursor: not-allowed; }
+
+    #fc-feedback {
+      margin-top: .5rem;
+      font-size: .74rem;
+      min-height: 1.1em;
+      text-align: center;
+      transition: opacity .3s;
+    }
+    #fc-feedback.ok  { color: #3fb950; }
+    #fc-feedback.err { color: #f85149; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>&#127754; Ocean Sensor Network</h1>
+  <div class="header-right">
+    <nav>
+      <a href="/ocean-overview/">Dashboard</a>
+      <a href="/ocean-overview/mapview.html" class="active">Map</a>
+    </nav>
+    <div id="buoy-count">Buoys: <span id="count">0</span></div>
+    <div id="status-badge">
+      <div id="status-dot" class="connecting"></div>
+      <span id="status-text">Connecting&hellip;</span>
+    </div>
+  </div>
+</header>
+
+<div id="map"></div>
+
+<!-- ── Fleet Control panel ──────────────────────────────────────────────── -->
+<div id="fleet-control">
+  <h2>&#9881;&#65039; Fleet Control</h2>
+
+  <div class="fc-row">
+    <div class="fc-label">Buoys <span id="fc-buoys-val">8</span></div>
+    <input id="fc-buoys" class="fc-slider" type="range" min="1" max="200" step="1" value="8" />
+  </div>
+
+  <div class="fc-total">
+    Total buoys <strong id="fc-total">8</strong>
+  </div>
+
+  <button id="fc-apply">Apply</button>
+  <div id="fc-feedback"></div>
+</div>
+
+<script>
+  // ── Map setup ──────────────────────────────────────────────────────────────
+  const map = L.map('map', { zoomControl: true }).setView([44.6488, -62.314], 7);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+    maxZoom: 19,
+  }).addTo(map);
+
+  // ── Buoy icon factory ──────────────────────────────────────────────────────
+  const BUOY_STATUS_COLOR = {
+    OPERATIONAL: '#3fb950',
+    DEGRADED:    '#d29922',
+    OFFLINE:     '#f85149',
+    MAINTENANCE: '#58a6ff',
+  };
+
+  function makeBuoyIcon(status) {
+    const color = BUOY_STATUS_COLOR[status] ?? '#8b949e';
+    // Circle with diamond (rotated square) inside
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="-16 -16 32 32">
+        <circle r="13" fill="#161b22" stroke="${color}" stroke-width="2.5"/>
+        <polygon points="0,-7 7,0 0,7 -7,0" fill="${color}" opacity="0.9"/>
+      </svg>`;
+    return L.divIcon({
+      html: svg,
+      className: '',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+      popupAnchor: [0, -18],
+    });
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function sectionHdr(label) {
+    return '<div class="section-hdr">' + label + '</div>';
+  }
+
+  function row(label, val) {
+    return '<div class="popup-row"><div><div class="popup-label">' + label + '</div>' +
+           '<div class="popup-val">' + val + '</div></div></div>';
+  }
+
+  function row2(label1, val1, label2, val2) {
+    return '<div class="popup-row">' +
+      '<div><div class="popup-label">' + label1 + '</div><div class="popup-val">' + val1 + '</div></div>' +
+      '<div><div class="popup-label">' + label2 + '</div><div class="popup-val">' + val2 + '</div></div>' +
+      '</div>';
+  }
+
+  function colorVal(val, color) {
+    return '<span style="color:' + color + '">' + val + '</span>';
+  }
+
+  /**
+   * Convert degrees to compass point (16-point).
+   */
+  function degreesToCompass(deg) {
+    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+  }
+
+  function fmt(v, decimals) {
+    if (v == null) return '—';
+    return Number(v).toFixed(decimals != null ? decimals : 2);
+  }
+
+  // ── Popup builder ──────────────────────────────────────────────────────────
+  function buoyPopupHtml(b) {
+    const status   = b.status ?? 'UNKNOWN';
+    const sc       = BUOY_STATUS_COLOR[status] ?? '#8b949e';
+    const tidal    = b.tidal          ?? {};
+    const atmo     = b.atmospheric    ?? {};
+    const ocn      = b.oceanographic  ?? {};
+    const wave     = b.wave           ?? {};
+    const cur      = b.current        ?? {};
+
+    // Tidal phase color
+    const phase = tidal.tidalPhase ?? '';
+    let phaseColor = '#8b949e';
+    if (phase === 'RISING')              phaseColor = '#3fb950';
+    else if (phase === 'FALLING')        phaseColor = '#d29922';
+    else if (phase === 'HIGH_SLACK' || phase === 'LOW_SLACK') phaseColor = '#58a6ff';
+
+    // CO2 color
+    const co2 = atmo.co2Ppm ?? 0;
+    const co2Color = co2 > 450 ? '#f85149' : co2 > 420 ? '#d29922' : '#3fb950';
+
+    // pH color
+    const ph = ocn.phLevel ?? 8.1;
+    const phColor = ph < 8.0 ? '#f85149' : ph < 8.1 ? '#d29922' : '#3fb950';
+
+    // Vertical current color
+    const vc = cur.verticalCurrentCmPerSec ?? 0;
+    const vcColor = vc > 0 ? '#58a6ff' : vc < 0 ? '#d29922' : '#8b949e';
+    const vcLabel = vc > 0 ? ' (upwelling)' : vc < 0 ? ' (downwelling)' : '';
+
+    // Wind direction as compass
+    const windComp = degreesToCompass(atmo.windDirectionDegrees ?? 0);
+
+    return `
+      <div class="popup-id">${b.buoyId ?? '—'}</div>
+      ${b.name ? '<div class="popup-name">&#128261; ' + b.name + '</div>' : ''}
+      <span class="status-pill status-${status}" style="border:1px solid ${sc}44">${status}</span>
+
+      ${row2('Lat', fmt(b.latitude, 5) + '°', 'Lon', fmt(b.longitude, 5) + '°')}
+      ${row2('Depth', fmt(b.deploymentDepthMeters, 1) + ' m', 'Updated', b.timestamp ? new Date(b.timestamp).toLocaleTimeString() : '—')}
+
+      ${sectionHdr('Tidal')}
+      <div class="data-grid">
+        <div class="data-cell"><div class="popup-label">Water Level</div><div class="popup-val">${fmt(tidal.waterLevelMeters, 2)} m</div></div>
+        <div class="data-cell"><div class="popup-label">Tidal Phase</div><div class="popup-val">${colorVal(phase || '—', phaseColor)}</div></div>
+        <div class="data-cell"><div class="popup-label">Rate</div><div class="popup-val">${fmt(tidal.tidalRateCmPerHour, 1)} cm/hr</div></div>
+        <div class="data-cell"><div class="popup-label">Range</div><div class="popup-val">${fmt(tidal.tidalRangeMeters, 2)} m</div></div>
+        <div class="data-cell"><div class="popup-label">Next Change</div><div class="popup-val">${tidal.nextTideChangeMinutes ?? '—'} min</div></div>
+        <div class="data-cell"><div class="popup-label">Hi / Lo</div><div class="popup-val">${fmt(tidal.predictedHighTideMeters, 2)} / ${fmt(tidal.predictedLowTideMeters, 2)} m</div></div>
+      </div>
+
+      ${sectionHdr('Atmospheric')}
+      <div class="data-grid">
+        <div class="data-cell"><div class="popup-label">CO&#8322;</div><div class="popup-val">${colorVal(fmt(co2, 1) + ' ppm', co2Color)}</div></div>
+        <div class="data-cell"><div class="popup-label">Pressure</div><div class="popup-val">${fmt(atmo.barometricPressureHpa, 1)} hPa</div></div>
+        <div class="data-cell"><div class="popup-label">Air Temp</div><div class="popup-val">${fmt(atmo.airTempCelsius, 1)} °C</div></div>
+        <div class="data-cell"><div class="popup-label">Wind</div><div class="popup-val">${fmt(atmo.windSpeedKnots, 1)} kn ${windComp}</div></div>
+        <div class="data-cell"><div class="popup-label">Humidity</div><div class="popup-val">${fmt(atmo.relativeHumidityPercent, 1)} %</div></div>
+        <div class="data-cell"><div class="popup-label">Solar Irradiance</div><div class="popup-val">${fmt(atmo.solarIrradianceWm2, 0)} W/m&#178;</div></div>
+      </div>
+
+      ${sectionHdr('Oceanographic')}
+      <div class="data-grid">
+        <div class="data-cell"><div class="popup-label">Surface Temp</div><div class="popup-val">${fmt(ocn.surfaceTempCelsius, 1)} °C</div></div>
+        <div class="data-cell"><div class="popup-label">Subsurface Temp</div><div class="popup-val">${fmt(ocn.subsurfaceTempCelsius, 1)} °C</div></div>
+        <div class="data-cell"><div class="popup-label">Salinity</div><div class="popup-val">${fmt(ocn.salinityPsu, 2)} PSU</div></div>
+        <div class="data-cell"><div class="popup-label">pH</div><div class="popup-val">${colorVal(fmt(ph, 2), phColor)}</div></div>
+        <div class="data-cell"><div class="popup-label">Dissolved O&#8322;</div><div class="popup-val">${fmt(ocn.dissolvedOxygenMgL, 2)} mg/L</div></div>
+        <div class="data-cell"><div class="popup-label">Turbidity</div><div class="popup-val">${fmt(ocn.turbidityNtu, 2)} NTU</div></div>
+        <div class="data-cell"><div class="popup-label">Chlorophyll</div><div class="popup-val">${fmt(ocn.chlorophyllUgL, 2)} &#181;g/L</div></div>
+        <div class="data-cell"><div class="popup-label">Dissolved CO&#8322;</div><div class="popup-val">${fmt(ocn.dissolvedCo2Umol, 1)} &#181;mol/kg</div></div>
+      </div>
+
+      ${sectionHdr('Waves')}
+      <div class="data-grid">
+        <div class="data-cell"><div class="popup-label">Significant Hs</div><div class="popup-val">${fmt(wave.significantWaveHeightMeters, 2)} m</div></div>
+        <div class="data-cell"><div class="popup-label">Max Height</div><div class="popup-val">${fmt(wave.maxWaveHeightMeters, 2)} m</div></div>
+        <div class="data-cell"><div class="popup-label">Peak Period</div><div class="popup-val">${fmt(wave.peakWavePeriodSeconds, 1)} s</div></div>
+        <div class="data-cell"><div class="popup-label">Direction</div><div class="popup-val">${fmt(wave.waveDirectionDegrees, 0)}° ${degreesToCompass(wave.waveDirectionDegrees ?? 0)}</div></div>
+        <div class="data-cell"><div class="popup-label">Swell Height</div><div class="popup-val">${fmt(wave.swellHeightMeters, 2)} m</div></div>
+        <div class="data-cell"><div class="popup-label">Swell Period</div><div class="popup-val">${fmt(wave.swellPeriodSeconds, 1)} s</div></div>
+      </div>
+
+      ${sectionHdr('Currents')}
+      <div class="data-grid">
+        <div class="data-cell"><div class="popup-label">Surface Speed</div><div class="popup-val">${fmt(cur.surfaceCurrentSpeedKnots, 2)} kn</div></div>
+        <div class="data-cell"><div class="popup-label">Surface Dir</div><div class="popup-val">${fmt(cur.surfaceCurrentDirectionDegrees, 0)}° ${degreesToCompass(cur.surfaceCurrentDirectionDegrees ?? 0)}</div></div>
+        <div class="data-cell"><div class="popup-label">Subsurface Speed</div><div class="popup-val">${fmt(cur.subsurfaceCurrentSpeedKnots, 2)} kn</div></div>
+        <div class="data-cell"><div class="popup-label">Subsurface Dir</div><div class="popup-val">${fmt(cur.subsurfaceCurrentDirectionDegrees, 0)}° ${degreesToCompass(cur.subsurfaceCurrentDirectionDegrees ?? 0)}</div></div>
+        <div class="data-cell" style="grid-column:span 2"><div class="popup-label">Vertical Current</div><div class="popup-val">${colorVal(fmt(vc, 2) + ' cm/s' + vcLabel, vcColor)}</div></div>
+      </div>`;
+  }
+
+  // ── Marker state ───────────────────────────────────────────────────────────
+  const buoyMarkers = new Map();   // buoyId → L.marker
+
+  function renderBuoys(buoys) {
+    document.getElementById('count').textContent = buoys.length;
+    const seen = new Set();
+    buoys.forEach(function (b) {
+      seen.add(b.buoyId);
+      const latlng = [b.latitude, b.longitude];
+      const icon   = makeBuoyIcon(b.status);
+      if (buoyMarkers.has(b.buoyId)) {
+        const m = buoyMarkers.get(b.buoyId);
+        m.setLatLng(latlng);
+        m.setIcon(icon);
+        if (m.isPopupOpen()) m.setPopupContent(buoyPopupHtml(b));
+      } else {
+        const marker = L.marker(latlng, { icon })
+          .bindPopup(buoyPopupHtml(b), { maxWidth: 380, className: 'buoy-popup' })
+          .addTo(map);
+        buoyMarkers.set(b.buoyId, marker);
+      }
+    });
+    buoyMarkers.forEach(function (m, id) {
+      if (!seen.has(id)) { m.remove(); buoyMarkers.delete(id); }
+    });
+  }
+
+  // ── STOMP ──────────────────────────────────────────────────────────────────
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+
+  function setStatus(state, label) { dot.className = state; txt.textContent = label; }
+
+  const client = new StompJs.Client({
+    webSocketFactory: function () { return new SockJS('/ocean-overview/ws'); },
+    reconnectDelay: 3000,
+    onConnect: function () {
+      setStatus('connected', 'Live');
+      client.subscribe('/topic/buoys', function (msg) {
+        try { renderBuoys(JSON.parse(msg.body)); }
+        catch (e) { console.error('buoy parse error', e); }
+      });
+    },
+    onDisconnect:     function () { setStatus('error', 'Disconnected'); },
+    onStompError:     function () { setStatus('error', 'Error'); },
+    onWebSocketClose: function () { setStatus('connecting', 'Reconnecting…'); },
+  });
+
+  client.activate();
+
+  // ── Fleet Control panel ────────────────────────────────────────────────────
+  (function () {
+    const buoysSlider = document.getElementById('fc-buoys');
+    const buoysVal    = document.getElementById('fc-buoys-val');
+    const totalEl     = document.getElementById('fc-total');
+    const applyBtn    = document.getElementById('fc-apply');
+    const feedback    = document.getElementById('fc-feedback');
+
+    let feedbackTimer = null;
+
+    function updateTotal() {
+      totalEl.textContent = parseInt(buoysSlider.value, 10).toLocaleString();
+    }
+
+    buoysSlider.addEventListener('input', function () {
+      buoysVal.textContent = this.value;
+      updateTotal();
+    });
+
+    function showFeedback(message, isError) {
+      clearTimeout(feedbackTimer);
+      feedback.textContent = message;
+      feedback.className   = isError ? 'err' : 'ok';
+      if (!isError) {
+        feedbackTimer = setTimeout(function () {
+          feedback.textContent = '';
+          feedback.className   = '';
+        }, 3000);
+      }
+    }
+
+    applyBtn.addEventListener('click', function () {
+      const buoyCount   = parseInt(buoysSlider.value, 10);
+      applyBtn.disabled = true;
+      feedback.textContent = '';
+      feedback.className   = '';
+
+      fetch('/ocean-overview/api/fleet/config', {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ buoyCount: buoyCount }),
+      })
+        .then(function (res) {
+          if (!res.ok) {
+            return res.text().then(function (t) { throw new Error(t || ('HTTP ' + res.status)); });
+          }
+          showFeedback('✓ Applied', false);
+        })
+        .catch(function (err) {
+          showFeedback(err.message || 'Request failed', true);
+        })
+        .finally(function () {
+          applyBtn.disabled = false;
+        });
+    });
+
+    // Populate slider from current server config on load
+    fetch('/ocean-overview/api/fleet/config')
+      .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
+      .then(function (cfg) {
+        if (cfg.buoyCount != null) {
+          buoysSlider.value    = Math.min(Math.max(cfg.buoyCount, 1), 200);
+          buoysVal.textContent = buoysSlider.value;
+        }
+        updateTotal();
+      })
+      .catch(function (err) { console.warn('Could not load fleet config:', err); });
+  })();
+</script>
+</body>
+</html>
