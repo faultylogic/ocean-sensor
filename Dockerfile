@@ -10,7 +10,7 @@ COPY src ./src
 RUN ./mvnw -q package -DskipTests
 
 # Extract Spring Boot layers for lean final image
-RUN java -Djarmode=layertools -jar target/ocean-sensor-1.0.0.jar extract --destination target/extracted
+RUN java -Djarmode=layertools -jar target/ocean-sensor-1.0.7.jar extract --destination target/extracted
 
 # ---- Runtime stage ----
 FROM eclipse-temurin:21-jre-alpine

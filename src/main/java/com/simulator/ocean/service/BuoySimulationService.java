@@ -56,11 +56,11 @@ public class BuoySimulationService {
         { 45.0, 45.3, -65.8, -65.1, 0.5 },  // mid Bay
         // ── Northumberland Strait — below PEI south shore (~46.0°N) ──
         { 45.8, 45.98, -64.0, -62.2, 0.5 },
-        // ── Gulf of St. Lawrence — start at 47.2°N to clear PEI (max ~47.1°N) ──
-        { 47.2, 49.5, -65.5, -62.0, 1.5 },  // Gulf west (north of PEI)
-        { 47.2, 49.5, -62.0, -59.5, 1.5 },  // Gulf east
-        // ── Atlantic east of Cape Breton ──
-        { 45.5, 47.5, -59.5, -55.0, 1.5 },
+        // ── Gulf of St. Lawrence — capped at 48.0°N to stay south of Gaspé Peninsula ──
+        { 47.2, 48.0, -65.5, -62.0, 1.5 },  // Gulf west
+        { 47.2, 48.0, -62.0, -59.5, 1.5 },  // Gulf east
+        // ── Atlantic east of Cape Breton — capped at 46.5°N to stay south of Newfoundland ──
+        { 45.5, 46.5, -59.5, -55.0, 1.5 },
     };
 
     private static final String[] ZONE_NAMES = {
@@ -139,6 +139,33 @@ public class BuoySimulationService {
             { 46.67, -64.40 },  // west shore
             { 46.30, -64.25 },  // SW shore
             { 46.00, -63.95 },  // close ring
+        },
+        // ── Gaspé Peninsula / southern Quebec Gulf shore ──────────────────────────
+        {
+            { 47.75, -65.50 },  // Baie des Chaleurs / NB-QC border
+            { 48.05, -65.20 },  // Carleton-sur-Mer
+            { 48.40, -64.50 },  // Chandler
+            { 48.75, -64.20 },  // Percé area
+            { 49.00, -63.50 },  // Gaspé town area
+            { 48.80, -63.00 },  // Forillon tip
+            { 48.40, -62.30 },  // east Gaspé coast
+            { 47.85, -61.90 },  // south Gaspé
+            { 47.50, -62.50 },  // Chaleur Bay east
+            { 47.50, -65.50 },  // back west along Chaleur Bay
+            { 47.75, -65.50 },  // close ring
+        },
+        // ── Southern Newfoundland (Burin Peninsula / Cabot Strait approaches) ──
+        {
+            { 47.00, -59.50 },  // SW Newfoundland, north of Cabot Strait
+            { 47.60, -59.40 },  // Port aux Basques area
+            { 47.70, -57.80 },  // south coast west
+            { 47.55, -56.30 },  // Burin Peninsula north
+            { 47.20, -55.80 },  // Burin Peninsula south
+            { 46.70, -55.50 },  // SE Newfoundland
+            { 46.60, -56.50 },  // south coast east
+            { 46.70, -58.00 },  // south coast central
+            { 46.80, -59.00 },  // south coast west
+            { 47.00, -59.50 },  // close ring
         },
         // ── New Brunswick — Bay of Fundy coast + Northumberland Strait coast ────
         {
@@ -298,9 +325,12 @@ public class BuoySimulationService {
                 dissolvedO2, turbidityNtu, chlorophyllUgL, dissolvedCo2Umol);
 
         // ── Tidal initial values (sinusoidal based on current time) ──────────────
-        double tidalRange        = 1.0 + random.nextDouble() * 1.5; // Halifax ~1.5 m range
-        double highTide          = 0.5 + tidalRange;
-        double lowTide           = 0.5;
+        // Tidal range is strongly location-dependent.
+        // Bay of Fundy: world's highest tides — 4–16 m at the head.
+        // Outer Scotian Shelf / Atlantic: much smaller — 0.5–1.5 m.
+        double tidalRange        = locationTidalRange(lat, lon);
+        double lowTide           = 0.3 + random.nextDouble() * 0.5;  // chart datum offset
+        double highTide          = lowTide + tidalRange;
         double midLevel          = (highTide + lowTide) / 2.0;
         long now                 = System.currentTimeMillis();
         double tidalAngle        = (2 * Math.PI * now) / TIDAL_PERIOD_MS;
@@ -451,6 +481,42 @@ public class BuoySimulationService {
         buoy.setTimestamp(Instant.now());
 
         metricsCollector.record(buoy);
+    }
+
+    /**
+     * Returns a realistic tidal range (metres) for the given location.
+     *
+     * Reference ranges (mean spring tides):
+     *   Bay of Fundy outer:   4 – 8 m
+     *   Bay of Fundy mid:     7 – 12 m   (approaches Minas Basin)
+     *   Northumberland Strait:1.0 – 2.0 m
+     *   Gulf of St. Lawrence: 0.3 – 0.8 m (semi-enclosed, small tides)
+     *   West Scotian Shelf:   1.0 – 2.0 m
+     *   Offshore Atlantic:    0.5 – 1.2 m
+     */
+    private double locationTidalRange(double lat, double lon) {
+        // Bay of Fundy mid (Minas Basin approaches) — highest tides on Earth
+        if (lat >= 45.0 && lat <= 45.4 && lon >= -65.9 && lon <= -65.0) {
+            return 7.0 + random.nextDouble() * 5.0;   // 7–12 m
+        }
+        // Bay of Fundy outer
+        if (lat >= 44.7 && lat <= 45.2 && lon >= -66.5 && lon <= -64.8) {
+            return 4.0 + random.nextDouble() * 4.0;   // 4–8 m
+        }
+        // Northumberland Strait
+        if (lat >= 45.8 && lat <= 46.2 && lon >= -64.2 && lon <= -62.0) {
+            return 1.0 + random.nextDouble() * 1.0;   // 1–2 m
+        }
+        // Gulf of St. Lawrence — semi-enclosed, small tidal range
+        if (lat >= 47.0 && lon >= -65.5 && lon <= -59.5) {
+            return 0.3 + random.nextDouble() * 0.5;   // 0.3–0.8 m
+        }
+        // West Scotian Shelf (close to shore)
+        if (lon <= -63.0) {
+            return 1.0 + random.nextDouble() * 1.0;   // 1–2 m
+        }
+        // Offshore Atlantic / Sable Island Bank / Grand Banks
+        return 0.5 + random.nextDouble() * 0.7;       // 0.5–1.2 m
     }
 
     /** Returns a random delta in [-maxDelta, +maxDelta] */
