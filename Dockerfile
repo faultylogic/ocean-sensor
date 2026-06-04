@@ -35,9 +35,9 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport \
 
 ENV SIMULATOR_BUOY_COUNT=8
 
-EXPOSE 8080
+EXPOSE 8081
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:8080/ocean-overview/actuator/health || exit 1
+  CMD wget -qO- http://localhost:8081/ocean-overview/actuator/health || exit 1
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS org.springframework.boot.loader.launch.JarLauncher"]

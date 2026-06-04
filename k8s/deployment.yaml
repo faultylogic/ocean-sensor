@@ -29,7 +29,7 @@ spec:
           imagePullPolicy: Always
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: 8081
               protocol: TCP
 
           # ---- Environment from ConfigMap ----
@@ -50,7 +50,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /ocean-overview/actuator/health/readiness
-              port: 8080
+              port: 8081
             initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 3
@@ -58,7 +58,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /ocean-overview/actuator/health/liveness
-              port: 8080
+              port: 8081
             initialDelaySeconds: 40
             periodSeconds: 30
             failureThreshold: 3
@@ -66,7 +66,7 @@ spec:
           startupProbe:
             httpGet:
               path: /ocean-overview/actuator/health
-              port: 8080
+              port: 8081
             initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 12    # allow up to 60 s for startup

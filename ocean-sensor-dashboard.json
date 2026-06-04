@@ -1,0 +1,224 @@
+{
+  "version": 21,
+  "variables": [
+    {
+      "key": "buoy",
+      "visible": true,
+      "type": "query",
+      "version": 2,
+      "editable": true,
+      "input": "metrics \n| filter metric.key == \"buoy.info\"\n| filter isNotNull(buoy_id)\n| fields buoy_id\n| dedup buoy_id",
+      "multiple": true
+    }
+  ],
+  "tiles": {
+
+    "hdr_overview": {
+      "type": "markdown",
+      "content": "## 🌊 Ocean Sensor Network — Live Telemetry\nUse the **Buoy** dropdown above to filter to one or more buoys. All tiles update every 5 seconds."
+    },
+
+    "tile_buoy_map": {
+      "title": "Buoy Positions — Live Map",
+      "type": "data",
+      "query": "timeseries {\n  latitude  = avg(`buoy.latitude`),\n  longitude = avg(`buoy.longitude`)\n}, by: {buoy_id}, from: now()-5m\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))\n| fields buoy_id,\n         latitude  = arrayLast(latitude),\n         longitude = arrayLast(longitude),\n         buoy_num  = toLong(subString(buoy_id, from: 5))",
+      "visualization": "map",
+      "visualizationSettings": { "colorPalette": "categorical" },
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-5m", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_status_snapshot": {
+      "title": "Sensor Status Snapshot",
+      "type": "data",
+      "query": "timeseries {\n  surface_temp = avg(`buoy.ocean.surface.temp.celsius`),\n  co2_ppm      = avg(`buoy.atm.co2.ppm`),\n  ph           = avg(`buoy.ocean.ph`),\n  dissolved_o2 = avg(`buoy.ocean.dissolved.oxygen.mgl`),\n  water_level  = avg(`buoy.tidal.water.level.meters`),\n  wave_hs      = avg(`buoy.wave.significant.height.meters`),\n  wind_speed   = avg(`buoy.atm.wind.speed.knots`),\n  pressure     = avg(`buoy.atm.pressure.hpa`),\n  salinity     = avg(`buoy.ocean.salinity.psu`),\n  current_spd  = avg(`buoy.current.surface.speed.knots`)\n}, by: {buoy_id}, from: now()-5m\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))\n| fields buoy_id,\n         surface_temp_c      = arrayLast(surface_temp),\n         co2_ppm             = arrayLast(co2_ppm),\n         ocean_ph            = arrayLast(ph),\n         dissolved_o2_mgl    = arrayLast(dissolved_o2),\n         water_level_m       = arrayLast(water_level),\n         wave_height_hs_m    = arrayLast(wave_hs),\n         wind_speed_kn       = arrayLast(wind_speed),\n         pressure_hpa        = arrayLast(pressure),\n         salinity_psu        = arrayLast(salinity),\n         current_speed_kn    = arrayLast(current_spd)",
+      "visualization": "table",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-5m", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_buoy_count": {
+      "title": "Active Buoys",
+      "type": "data",
+      "query": "timeseries count(`buoy.info`), by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-1h", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_update_rate": {
+      "title": "Telemetry Update Rate",
+      "type": "data",
+      "query": "timeseries count(`buoy.ocean.surface.temp.celsius`), by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-1h", "maxResultMegaBytes": 100 }
+    },
+
+    "hdr_tidal": {
+      "type": "markdown",
+      "content": "## 🌊 Tidal Data\nWater level · Rate of change · Tidal range · Next slack"
+    },
+
+    "tile_tidal_chart": {
+      "title": "Water Level & Tidal Rate",
+      "type": "data",
+      "query": "timeseries {\n  water_level = avg(`buoy.tidal.water.level.meters`),\n  tidal_rate  = avg(`buoy.tidal.rate.cm.per.hour`),\n  tidal_range = avg(`buoy.tidal.range.meters`)\n}, by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-6h", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_tidal_raw": {
+      "title": "Tidal — Current Values",
+      "type": "data",
+      "query": "timeseries {\n  lvl   = avg(`buoy.tidal.water.level.meters`),\n  rate  = avg(`buoy.tidal.rate.cm.per.hour`),\n  range = avg(`buoy.tidal.range.meters`),\n  next  = avg(`buoy.tidal.next.change.minutes`)\n}, by: {buoy_id}, from: now()-5m\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))\n| fields buoy_id,\n         water_level_m       = arrayLast(lvl),\n         tidal_rate_cm_hr    = arrayLast(rate),\n         tidal_range_m       = arrayLast(range),\n         next_slack_minutes  = arrayLast(next)",
+      "visualization": "table",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-5m", "maxResultMegaBytes": 100 }
+    },
+
+    "hdr_atmospheric": {
+      "type": "markdown",
+      "content": "## 🌬️ Atmospheric Data\nCO₂ concentration · Barometric pressure · Air temperature · Wind · Humidity · Solar irradiance"
+    },
+
+    "tile_atm_co2_pressure": {
+      "title": "CO₂ & Barometric Pressure",
+      "type": "data",
+      "query": "timeseries {\n  co2      = avg(`buoy.atm.co2.ppm`),\n  pressure = avg(`buoy.atm.pressure.hpa`)\n}, by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-1h", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_atm_wind_temp": {
+      "title": "Wind, Air Temperature & Humidity",
+      "type": "data",
+      "query": "timeseries {\n  wind_speed = avg(`buoy.atm.wind.speed.knots`),\n  air_temp   = avg(`buoy.atm.air.temp.celsius`),\n  humidity   = avg(`buoy.atm.humidity.percent`),\n  solar      = avg(`buoy.atm.solar.irradiance.wm2`)\n}, by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-1h", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_atm_raw": {
+      "title": "Atmospheric — Current Values",
+      "type": "data",
+      "query": "timeseries {\n  co2      = avg(`buoy.atm.co2.ppm`),\n  pres     = avg(`buoy.atm.pressure.hpa`),\n  atemp    = avg(`buoy.atm.air.temp.celsius`),\n  wspd     = avg(`buoy.atm.wind.speed.knots`),\n  wdir     = avg(`buoy.atm.wind.direction.degrees`),\n  hum      = avg(`buoy.atm.humidity.percent`),\n  solar    = avg(`buoy.atm.solar.irradiance.wm2`)\n}, by: {buoy_id}, from: now()-5m\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))\n| fields buoy_id,\n         co2_ppm             = arrayLast(co2),\n         pressure_hpa        = arrayLast(pres),\n         air_temp_c          = arrayLast(atemp),\n         wind_speed_kn       = arrayLast(wspd),\n         wind_direction_deg  = arrayLast(wdir),\n         humidity_pct        = arrayLast(hum),\n         solar_irradiance_wm2 = arrayLast(solar)",
+      "visualization": "table",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-5m", "maxResultMegaBytes": 100 }
+    },
+
+    "hdr_oceanographic": {
+      "type": "markdown",
+      "content": "## 🔬 Oceanographic Data\nSurface & subsurface temperature · Salinity · pH · Dissolved oxygen · Turbidity · Chlorophyll · Dissolved CO₂"
+    },
+
+    "tile_ocean_temp_salinity": {
+      "title": "Temperature & Salinity",
+      "type": "data",
+      "query": "timeseries {\n  surf_temp = avg(`buoy.ocean.surface.temp.celsius`),\n  sub_temp  = avg(`buoy.ocean.subsurface.temp.celsius`),\n  salinity  = avg(`buoy.ocean.salinity.psu`)\n}, by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-1h", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_ocean_ph_o2": {
+      "title": "pH, Dissolved Oxygen & Turbidity",
+      "type": "data",
+      "query": "timeseries {\n  ph       = avg(`buoy.ocean.ph`),\n  do2      = avg(`buoy.ocean.dissolved.oxygen.mgl`),\n  turb     = avg(`buoy.ocean.turbidity.ntu`),\n  chloro   = avg(`buoy.ocean.chlorophyll.ugl`),\n  dco2     = avg(`buoy.ocean.dissolved.co2.umol`)\n}, by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-1h", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_ocean_raw": {
+      "title": "Oceanographic — Current Values",
+      "type": "data",
+      "query": "timeseries {\n  st  = avg(`buoy.ocean.surface.temp.celsius`),\n  sst = avg(`buoy.ocean.subsurface.temp.celsius`),\n  sal = avg(`buoy.ocean.salinity.psu`),\n  ph  = avg(`buoy.ocean.ph`),\n  do2 = avg(`buoy.ocean.dissolved.oxygen.mgl`),\n  trb = avg(`buoy.ocean.turbidity.ntu`),\n  chl = avg(`buoy.ocean.chlorophyll.ugl`),\n  dc2 = avg(`buoy.ocean.dissolved.co2.umol`)\n}, by: {buoy_id}, from: now()-5m\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))\n| fields buoy_id,\n         surface_temp_c       = arrayLast(st),\n         subsurface_temp_c    = arrayLast(sst),\n         salinity_psu         = arrayLast(sal),\n         ph_level             = arrayLast(ph),\n         dissolved_o2_mgl     = arrayLast(do2),\n         turbidity_ntu        = arrayLast(trb),\n         chlorophyll_ugl      = arrayLast(chl),\n         dissolved_co2_umol   = arrayLast(dc2)",
+      "visualization": "table",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-5m", "maxResultMegaBytes": 100 }
+    },
+
+    "hdr_wave": {
+      "type": "markdown",
+      "content": "## 🌀 Wave Data\nSignificant wave height (Hs) · Max wave height · Peak period (Tp) · Swell · Wave direction"
+    },
+
+    "tile_wave_heights": {
+      "title": "Wave Heights & Period",
+      "type": "data",
+      "query": "timeseries {\n  hs     = avg(`buoy.wave.significant.height.meters`),\n  hmax   = avg(`buoy.wave.max.height.meters`),\n  tp     = avg(`buoy.wave.peak.period.seconds`),\n  swell  = avg(`buoy.wave.swell.height.meters`)\n}, by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-1h", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_wave_raw": {
+      "title": "Wave — Current Values",
+      "type": "data",
+      "query": "timeseries {\n  hs    = avg(`buoy.wave.significant.height.meters`),\n  hmax  = avg(`buoy.wave.max.height.meters`),\n  tp    = avg(`buoy.wave.peak.period.seconds`),\n  wdir  = avg(`buoy.wave.direction.degrees`),\n  swell = avg(`buoy.wave.swell.height.meters`)\n}, by: {buoy_id}, from: now()-5m\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))\n| fields buoy_id,\n         significant_wave_hs_m  = arrayLast(hs),\n         max_wave_height_m      = arrayLast(hmax),\n         peak_period_tp_s       = arrayLast(tp),\n         wave_direction_deg     = arrayLast(wdir),\n         swell_height_m         = arrayLast(swell)",
+      "visualization": "table",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-5m", "maxResultMegaBytes": 100 }
+    },
+
+    "hdr_current": {
+      "type": "markdown",
+      "content": "## 🌊 Ocean Currents\nSurface & subsurface current speed/direction · Vertical current (upwelling/downwelling)"
+    },
+
+    "tile_current_chart": {
+      "title": "Surface & Subsurface Currents",
+      "type": "data",
+      "query": "timeseries {\n  surf_spd  = avg(`buoy.current.surface.speed.knots`),\n  sub_spd   = avg(`buoy.current.subsurface.speed.knots`),\n  surf_dir  = avg(`buoy.current.surface.direction.degrees`),\n  vert      = avg(`buoy.current.vertical.cm.per.sec`)\n}, by: {buoy_id}\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))",
+      "visualization": "lineChart",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-1h", "maxResultMegaBytes": 100 }
+    },
+
+    "tile_current_raw": {
+      "title": "Currents — Current Values",
+      "type": "data",
+      "query": "timeseries {\n  ss  = avg(`buoy.current.surface.speed.knots`),\n  sd  = avg(`buoy.current.surface.direction.degrees`),\n  sbs = avg(`buoy.current.subsurface.speed.knots`),\n  sbd = avg(`buoy.current.subsurface.direction.degrees`),\n  vc  = avg(`buoy.current.vertical.cm.per.sec`)\n}, by: {buoy_id}, from: now()-5m\n| filter isNull(array($buoy)[0]) or in(buoy_id, array($buoy))\n| fields buoy_id,\n         surface_speed_kn      = arrayLast(ss),\n         surface_direction_deg  = arrayLast(sd),\n         subsurface_speed_kn    = arrayLast(sbs),\n         subsurface_dir_deg     = arrayLast(sbd),\n         vertical_cm_per_sec    = arrayLast(vc)",
+      "visualization": "table",
+      "visualizationSettings": {},
+      "querySettings": { "maxResultRecords": 1000, "defaultTimeframe": "now()-5m", "maxResultMegaBytes": 100 }
+    }
+  },
+
+  "layouts": {
+    "hdr_overview":          { "x": 0,  "y": 0,  "w": 24, "h": 2 },
+    "tile_buoy_map":         { "x": 0,  "y": 2,  "w": 14, "h": 7 },
+    "tile_status_snapshot":  { "x": 14, "y": 2,  "w": 10, "h": 7 },
+    "tile_buoy_count":       { "x": 0,  "y": 9,  "w": 12, "h": 4 },
+    "tile_update_rate":      { "x": 12, "y": 9,  "w": 12, "h": 4 },
+
+    "hdr_tidal":             { "x": 0,  "y": 13, "w": 24, "h": 2 },
+    "tile_tidal_chart":      { "x": 0,  "y": 15, "w": 12, "h": 4 },
+    "tile_tidal_raw":        { "x": 12, "y": 15, "w": 12, "h": 4 },
+
+    "hdr_atmospheric":       { "x": 0,  "y": 19, "w": 24, "h": 2 },
+    "tile_atm_co2_pressure": { "x": 0,  "y": 21, "w": 12, "h": 4 },
+    "tile_atm_wind_temp":    { "x": 12, "y": 21, "w": 12, "h": 4 },
+    "tile_atm_raw":          { "x": 0,  "y": 25, "w": 24, "h": 4 },
+
+    "hdr_oceanographic":     { "x": 0,  "y": 29, "w": 24, "h": 2 },
+    "tile_ocean_temp_salinity":{ "x": 0, "y": 31, "w": 12, "h": 4 },
+    "tile_ocean_ph_o2":      { "x": 12, "y": 31, "w": 12, "h": 4 },
+    "tile_ocean_raw":        { "x": 0,  "y": 35, "w": 24, "h": 4 },
+
+    "hdr_wave":              { "x": 0,  "y": 39, "w": 24, "h": 2 },
+    "tile_wave_heights":     { "x": 0,  "y": 41, "w": 12, "h": 4 },
+    "tile_wave_raw":         { "x": 12, "y": 41, "w": 12, "h": 4 },
+
+    "hdr_current":           { "x": 0,  "y": 45, "w": 24, "h": 2 },
+    "tile_current_chart":    { "x": 0,  "y": 47, "w": 12, "h": 4 },
+    "tile_current_raw":      { "x": 12, "y": 47, "w": 12, "h": 4 }
+  },
+
+  "importedWithCode": false,
+  "settings": {},
+  "annotations": []
+}
