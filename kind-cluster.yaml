@@ -1,0 +1,26 @@
+apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+name: kind
+nodes:
+- role: control-plane
+  image: kindest/node:v1.30.0
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraMounts:
+  #This provides a mount location for the PVC's needed by the dynatrace collectors
+  - hostPath: /
+    containerPath: /mnt/root
+  #This mount is needed for the agents-otel-collector-0.  This pod will fail if it can't access the `apparmor` section found here
+  - hostPath: /sys/kernel/security
+    containerPath: /sys/kernel/security
+  extraPortMappings:
+  - hostPort: 80
+    containerPort: 80
+    protocol: TCP
+  - hostPort: 443
+    containerPort: 443
+    protocol: TCP
