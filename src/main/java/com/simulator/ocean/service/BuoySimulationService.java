@@ -27,24 +27,140 @@ public class BuoySimulationService {
 
     private static final Logger log = LoggerFactory.getLogger(BuoySimulationService.class);
 
-    // Geographic centre — Halifax Approaches, Nova Scotia
-    private static final double BASE_LAT = 44.6488;
-    private static final double BASE_LON = -62.314;
     private static final double METERS_PER_DEGREE_LAT = 111_320.0;
-    private static final double SPAWN_RADIUS_METERS = 80_000.0; // 80 km radius
-    private static final double MAX_DRIFT_METERS = 5.0;          // buoys drift slowly (anchored)
+    private static final double MAX_DRIFT_METERS = 5.0;         // buoys drift slowly (anchored)
     private static final long   TICK_MS = 5_000L;               // 5-second tick
     private static final long   TIDAL_PERIOD_MS = 44_712_000L;  // 12h 25min lunar tidal cycle
 
-    private static final String[] BUOY_NAMES = {
-            "Halifax Approaches Buoy",
-            "Sable Island East Buoy",
-            "Cabot Strait North Buoy",
-            "Scotian Shelf Buoy",
-            "Grand Banks West Buoy",
-            "Labrador Current Buoy",
-            "St. Lawrence South Buoy",
-            "Emerald Basin Buoy"
+    /**
+     * Candidate spawn zones — bounding rectangles in open water near Nova Scotia
+     * and the Canadian eastern coastline, all within ~150 km of shore.
+     * Columns: { minLat, maxLat, minLon, maxLon, weight }
+     * Points that fall inside a LAND_POLYGON are rejected and retried.
+     */
+    private static final double[][] WATER_ZONES = {
+        // ── Scotian Shelf — narrow latitude bands follow the rising NS south shore ──
+        { 43.0, 43.5, -66.8, -65.8, 0.5 },  // SW — south of Cape Sable
+        { 43.0, 43.6, -65.8, -65.0, 0.8 },  // west shelf
+        { 43.0, 43.8, -65.0, -64.0, 1.5 },  // west-central shelf
+        { 43.0, 43.9, -64.0, -63.0, 1.5 },  // central shelf
+        { 43.0, 44.1, -63.0, -62.0, 1.5 },  // central-east shelf
+        { 43.0, 44.5, -62.0, -61.0, 1.5 },  // east shelf
+        { 43.0, 45.5, -61.0, -58.5, 2.5 },  // Sable Island Bank
+        { 43.0, 46.5, -58.5, -55.0, 2.0 },  // Grand Banks approaches
+        // ── Bay of Fundy — centred between the NS and NB shores ──
+        // NS Fundy shore: ~44.6°N at -66°W, ~45.0°N at -65°W
+        // NB Fundy shore: ~45.3°N at -66°W, ~45.7°N at -65°W
+        // Keep zones in the 0.3° gap between them
+        { 44.8, 45.1, -66.3, -65.8, 0.6 },  // outer Bay
+        { 45.0, 45.3, -65.8, -65.1, 0.5 },  // mid Bay
+        // ── Northumberland Strait — below PEI south shore (~46.0°N) ──
+        { 45.8, 45.98, -64.0, -62.2, 0.5 },
+        // ── Gulf of St. Lawrence — start at 47.2°N to clear PEI (max ~47.1°N) ──
+        { 47.2, 49.5, -65.5, -62.0, 1.5 },  // Gulf west (north of PEI)
+        { 47.2, 49.5, -62.0, -59.5, 1.5 },  // Gulf east
+        // ── Atlantic east of Cape Breton ──
+        { 45.5, 47.5, -59.5, -55.0, 1.5 },
+    };
+
+    private static final String[] ZONE_NAMES = {
+        "SW Nova Scotia Shelf",
+        "West Scotian Shelf",
+        "West-Central Scotian Shelf",
+        "Central Scotian Shelf",
+        "Eastern Scotian Shelf",
+        "East Scotian Shelf",
+        "Sable Island Bank",
+        "Grand Banks Approaches",
+        "Bay of Fundy",
+        "Bay of Fundy Mid",
+        "Northumberland Strait",
+        "Gulf of St. Lawrence West",
+        "Gulf of St. Lawrence East",
+        "Atlantic Shelf",
+    };
+
+    /**
+     * Simplified land polygons for point-in-polygon rejection sampling.
+     * Each polygon is an array of { lat, lon } pairs, last point closes the ring.
+     * Conservative (slightly smaller than reality) to avoid false rejections
+     * at sea — we reject rather than falsely accept land points.
+     */
+    private static final double[][][] LAND_POLYGONS = {
+        // ── Nova Scotia mainland ──────────────────────────────────────────────
+        {
+            { 43.43, -65.62 },  // Cape Sable (southernmost tip)
+            { 43.65, -65.10 },  // south shore west
+            { 43.90, -64.60 },  // Liverpool / Mersey area
+            { 44.20, -64.20 },  // Chester / Mahone Bay
+            { 44.50, -63.80 },  // Chester heading east
+            { 44.68, -63.55 },  // Halifax
+            { 44.85, -63.10 },  // Dartmouth / Eastern Shore
+            { 45.05, -62.60 },  // Sheet Harbour area
+            { 45.30, -61.80 },  // Guysborough area
+            { 45.52, -61.05 },  // Canso (NE tip of mainland)
+            { 45.65, -61.40 },  // Strait of Canso north shore
+            { 45.72, -62.00 },  // north shore heading west
+            { 45.72, -62.80 },  // Antigonish / New Glasgow area
+            { 45.65, -63.50 },  // Pictou
+            { 45.55, -64.00 },  // Tatamagouche / Wallace area
+            { 45.47, -64.40 },  // Parrsboro area
+            { 45.35, -64.50 },  // Advocate Harbour
+            { 45.22, -64.68 },  // Cape Split area
+            { 44.95, -65.17 },  // Digby Neck
+            { 44.67, -65.76 },  // Digby
+            { 44.52, -65.95 },  // Bear River area
+            { 44.38, -66.13 },  // Yarmouth
+            { 43.82, -66.15 },  // Cape Forchu
+            { 43.43, -65.62 },  // close ring
+        },
+        // ── Cape Breton Island ────────────────────────────────────────────────
+        {
+            { 45.60, -61.40 },  // SW corner
+            { 45.62, -61.05 },  // south shore
+            { 45.80, -60.40 },  // SE
+            { 46.15, -59.92 },  // east coast south
+            { 46.60, -60.00 },  // east coast central
+            { 46.90, -60.10 },  // east coast north
+            { 47.03, -60.50 },  // NE tip
+            { 46.90, -61.10 },  // north shore
+            { 46.62, -61.40 },  // NW
+            { 46.30, -61.45 },  // west shore
+            { 45.98, -61.50 },  // SW
+            { 45.60, -61.40 },  // close ring
+        },
+        // ── Prince Edward Island ──────────────────────────────────────────────
+        {
+            { 46.00, -63.95 },  // SW
+            { 46.00, -62.85 },  // south shore east
+            { 46.18, -62.10 },  // SE tip
+            { 46.62, -62.05 },  // east
+            { 47.07, -64.00 },  // NW
+            { 46.67, -64.40 },  // west shore
+            { 46.30, -64.25 },  // SW shore
+            { 46.00, -63.95 },  // close ring
+        },
+        // ── New Brunswick — Bay of Fundy coast + Northumberland Strait coast ────
+        {
+            { 44.65, -67.00 },  // SW corner (Maine/NB border area)
+            { 45.13, -66.80 },  // west coast NB
+            { 45.28, -66.07 },  // Saint John
+            { 45.55, -65.55 },  // Hampton area
+            { 45.72, -65.20 },  // Sussex
+            { 46.10, -64.82 },  // Moncton
+            { 46.25, -64.60 },  // Riverview
+            { 46.52, -64.80 },  // Shediac area
+            { 46.72, -64.65 },  // Bouctouche
+            { 47.00, -64.96 },  // Richibucto
+            { 47.40, -65.00 },  // Miramichi
+            { 47.95, -65.30 },  // Bathurst
+            { 48.40, -65.70 },  // Dalhousie
+            { 48.50, -66.40 },  // Campbellton / Restigouche
+            { 48.50, -68.50 },  // far west NB / QC border
+            { 47.50, -68.50 },  // Maine/NB west border
+            { 45.20, -67.50 },  // Maine border south
+            { 44.65, -67.00 },  // close ring
+        },
     };
 
     @Value("${simulator.buoy-count:8}")
@@ -70,16 +186,90 @@ public class BuoySimulationService {
         log.info("Fleet initialised: {} buoys active", fleet.size());
     }
 
+    /**
+     * Ray-casting point-in-polygon test.
+     * Returns true if (lat, lon) is inside the given polygon.
+     * Polygon vertices are { lat, lon } pairs; the ring auto-closes.
+     */
+    private boolean pointInPolygon(double lat, double lon, double[][] poly) {
+        int n = poly.length;
+        boolean inside = false;
+        for (int i = 0, j = n - 1; i < n; j = i++) {
+            double yi = poly[i][0], xi = poly[i][1];
+            double yj = poly[j][0], xj = poly[j][1];
+            if (((yi > lat) != (yj > lat)) &&
+                (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+
+    /** Returns true if the coordinate falls inside any of the land polygons. */
+    private boolean isOnLand(double lat, double lon) {
+        for (double[][] poly : LAND_POLYGONS) {
+            if (pointInPolygon(lat, lon, poly)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Picks a water zone using weighted random selection, generates a random point
+     * within it, and retries up to MAX_SPAWN_TRIES times if the point falls on land.
+     * Falls back to the zone's centre if all retries are exhausted.
+     */
+    private static final int MAX_SPAWN_TRIES = 30;
+
+    private double[] pickSpawnLocation() {
+        double totalWeight = 0;
+        for (double[] z : WATER_ZONES) totalWeight += z[4];
+
+        // Weighted zone selection
+        double pick = random.nextDouble() * totalWeight;
+        double cumulative = 0;
+        double[] chosenZone = WATER_ZONES[WATER_ZONES.length - 1];
+        for (double[] zone : WATER_ZONES) {
+            cumulative += zone[4];
+            if (pick <= cumulative) { chosenZone = zone; break; }
+        }
+
+        // Rejection sampling — retry if point lands on a land polygon
+        for (int attempt = 0; attempt < MAX_SPAWN_TRIES; attempt++) {
+            double lat = chosenZone[0] + random.nextDouble() * (chosenZone[1] - chosenZone[0]);
+            double lon = chosenZone[2] + random.nextDouble() * (chosenZone[3] - chosenZone[2]);
+            if (!isOnLand(lat, lon)) return new double[]{ lat, lon };
+        }
+
+        // All retries failed — use zone centre (guaranteed water for our zones)
+        log.warn("Spawn retries exhausted for zone [{},{}],[{},{}] — using zone centre",
+                chosenZone[0], chosenZone[1], chosenZone[2], chosenZone[3]);
+        return new double[]{
+            (chosenZone[0] + chosenZone[1]) / 2.0,
+            (chosenZone[2] + chosenZone[3]) / 2.0
+        };
+    }
+
+    /** Returns the name of the water zone that contains the given coordinate. */
+    private String zoneName(double lat, double lon) {
+        for (int i = 0; i < WATER_ZONES.length; i++) {
+            double[] z = WATER_ZONES[i];
+            if (lat >= z[0] && lat <= z[1] && lon >= z[2] && lon <= z[3]) {
+                return ZONE_NAMES[i];
+            }
+        }
+        return "Nova Scotia Waters";
+    }
+
     private void spawnBuoy(int index) {
         String id = String.format("BUOY-%03d", index);
-        String name = BUOY_NAMES[(index - 1) % BUOY_NAMES.length] + " " + index;
 
-        // Scatter buoys randomly within SPAWN_RADIUS from base coordinates
-        double angle = random.nextDouble() * 2 * Math.PI;
-        double dist  = random.nextDouble() * SPAWN_RADIUS_METERS;
-        double lat = BASE_LAT + (dist * Math.sin(angle)) / METERS_PER_DEGREE_LAT;
-        double metersPerDegreeLon = METERS_PER_DEGREE_LAT * Math.cos(Math.toRadians(BASE_LAT));
-        double lon = BASE_LON + (dist * Math.cos(angle)) / metersPerDegreeLon;
+        // Pick a random location within a verified water zone
+        double[] loc = pickSpawnLocation();
+        double lat = loc[0];
+        double lon = loc[1];
+
+        // Name buoy after the zone it landed in
+        String name = zoneName(lat, lon) + " Buoy " + index;
 
         double deploymentDepth = 30.0 + random.nextDouble() * 470.0; // 30-500 m
 
